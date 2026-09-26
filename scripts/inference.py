@@ -20,7 +20,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=str, required=True)
     parser.add_argument("--image", type=str, required=True)
     parser.add_argument("--model", type=str, default="simple_cnn", help="Model registry key used at training time")
-    parser.add_argument("--num-classes", type=int, default=47)
+    parser.add_argument("--num-classes", type=int, default=62)
     parser.add_argument("--device", type=str, default="auto")
     return parser.parse_args()
 
