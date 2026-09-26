@@ -39,3 +39,45 @@ def load_checkpoint(
     if optimizer is not None and payload.get("optimizer_state_dict") is not None:
         optimizer.load_state_dict(payload["optimizer_state_dict"])
     return payload
+
+
+def find_best_checkpoint(
+    checkpoint_dir: str | Path,
+    pattern: str = "*.pt",
+    metric_key: str = "loss",
+    mode: str = "min",
+) -> Path:
+    """Scan checkpoint_dir for files matching `pattern`, read each checkpoint's
+    stored `metrics[metric_key]` payload, and return the path with the best value.
+
+    Reads metrics from inside each checkpoint (not the filename), so it's exact
+    and doesn't depend on your naming convention.
+    """
+    checkpoint_dir = Path(checkpoint_dir)
+    candidates = list(checkpoint_dir.glob(pattern))
+    if not candidates:
+        raise FileNotFoundError(f"No checkpoints matching '{pattern}' in {checkpoint_dir}")
+
+    best_path, best_value = None, None
+    for path in candidates:
+        payload = torch.load(path, map_location="cpu")
+        metrics = payload.get("metrics", {})
+        if metric_key not in metrics:
+            continue
+        value = metrics[metric_key]
+        is_better = best_value is None or (
+            value < best_value if mode == "min" else value > best_value
+        )
+        if is_better:
+            best_path, best_value = path, value
+
+    if best_path is None:
+        raise ValueError(f"No checkpoint in {checkpoint_dir} had metric '{metric_key}'")
+
+    return best_path
+
+def remove_previous(checkpoint_dir: Path, suffix: str) -> None:
+    """Delete any existing checkpoint file ending in `suffix` (e.g. '_best.pt' or '_last.pt')
+    before a new one is saved, so only the single most recent one of that kind is kept."""
+    for old_file in checkpoint_dir.glob(f"*{suffix}"):
+        old_file.unlink()

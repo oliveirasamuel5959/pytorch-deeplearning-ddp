@@ -11,7 +11,7 @@ from deeplearning.config import TrainConfig
 from deeplearning.datasets.emnist import build_dataloaders
 from deeplearning.engine.evaluate import evaluate
 from deeplearning.engine.train_one_epoch import train_one_epoch
-from deeplearning.utils.checkpoint import save_checkpoint
+from deeplearning.utils.checkpoint import find_best_checkpoint, remove_previous, save_checkpoint
 from deeplearning.utils.logger import MetricsLogger, get_logger
 from deeplearning.utils.metrics import compute_classification_report, plot_confusion_matrix
 
@@ -64,7 +64,7 @@ def run_training(
     best_val_acc = 0.0
     epochs_without_improvement = 0
 
-    logger.info(f"Starting run '{cfg.run_name}' on device={device} for {cfg.train.epochs} epochs")
+    logger.info(f"Training run '{cfg.run_name}' on device={device} for {cfg.train.epochs} epochs")
 
     for epoch in range(1, cfg.train.epochs + 1):
         train_metrics = train_one_epoch(model, train_loader, optimizer, criterion, device, epoch)
@@ -91,7 +91,7 @@ def run_training(
 
         if cfg.output.save_every_epoch:
             save_checkpoint(
-                    run_dir / "checkpoints" / f"{cfg.run_name}_epoch_{epoch:03d}.pt",
+                run_dir / "checkpoints" / f"{cfg.run_name}_epoch_{epoch:03d}_{val_metrics['accuracy']:.4f}.pt",
                 model, optimizer, epoch, val_metrics,
             )
 
@@ -99,12 +99,17 @@ def run_training(
         if is_best:
             best_val_acc = val_metrics["accuracy"]
             epochs_without_improvement = 0
-            save_checkpoint(run_dir / "checkpoints" / f"{cfg.run_name}_best.pt", model, optimizer, epoch, val_metrics)
-            logger.info(f"  -> new best val_acc={best_val_acc:.4f}, checkpoint saved")
+            
+            remove_previous(run_dir / "checkpoints", "_best.pt")
+            save_checkpoint(
+                run_dir / "checkpoints" / f"{cfg.run_name}_epoch_{epoch:03d}_valacc{val_metrics['accuracy']:.4f}_valloss{val_metrics['loss']:.4f}_best.pt", 
+                model, optimizer, epoch, val_metrics)
+            logger.info(f"[OK] New best val_acc={best_val_acc:.4f}, checkpoint saved")
         else:
             epochs_without_improvement += 1
 
-        save_checkpoint(run_dir / "checkpoints" / f"{cfg.run_name}_last.pt", model, optimizer, epoch, val_metrics)
+        remove_previous(run_dir / "checkpoints", "_last.pt")
+        save_checkpoint(run_dir / "checkpoints" / f"{cfg.run_name}_epoch_{epoch:03d}_valacc{val_metrics['accuracy']:.4f}_valloss{val_metrics['loss']:.4f}_last.pt", model, optimizer, epoch, val_metrics)
 
         if epochs_without_improvement >= cfg.train.early_stopping_patience:
             logger.info(f"Early stopping at epoch {epoch} (no improvement for {epochs_without_improvement} epochs)")
@@ -112,8 +117,16 @@ def run_training(
 
     logger.info("Training complete. Evaluating on test set with best checkpoint...")
     from deeplearning.utils.checkpoint import load_checkpoint
+    
+    best_ckpt = find_best_checkpoint(
+        run_dir / "checkpoints",
+        pattern=f"{cfg.run_name}_epoch_*_best.pt",
+        metric_key="loss",
+        mode="min",
+    )
 
-    load_checkpoint(run_dir / "checkpoints" / f"{cfg.run_name}_best.pt", model, map_location=device)
+    # load_checkpoint(run_dir / "checkpoints" / f"{cfg.run_name}_epoch_{epoch:03d}_valacc{val_metrics['accuracy']:.4f}_valloss{val_metrics['loss']:.4f}_best.pt", model, map_location=device)
+    load_checkpoint(best_ckpt, model, map_location=device)
     test_metrics = evaluate(model, test_loader, criterion, device, collect_predictions=True, desc="test")
 
     compute_classification_report(
