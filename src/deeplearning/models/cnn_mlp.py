@@ -28,7 +28,7 @@ class CNNClassifier(nn.Module):
     
     self.classifier = nn.Sequential(
       nn.Flatten(),
-      nn.Linear(128 * 4 * 4, 256),  # Assuming input image size is 32x32
+      nn.Linear(128 * 3 * 3, 256),  # Assuming input image size is 32x32
       nn.ReLU(),
       nn.Linear(256, num_classes),
     )
@@ -38,8 +38,12 @@ class CNNClassifier(nn.Module):
     x = self.classifier(x)
     return x
   
+def build_model(input_channels: int, num_classes: int) -> nn.Module:
+  """Build a CNN model for classification."""
+  return CNNClassifier(input_channels=input_channels, num_classes=num_classes)
+  
 def main():
-  model = CNNClassifier(input_channels=3, num_classes=10)
+  model = CNNClassifier(input_channels=1, num_classes=62)
   
   print("\n ====== [MODEL] Architecture =======")
   print(model)

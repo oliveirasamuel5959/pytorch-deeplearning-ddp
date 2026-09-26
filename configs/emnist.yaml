@@ -1,0 +1,29 @@
+run_name: emnist_cnn
+
+data:
+  root: data/               # where EMNIST raw/processed files live (auto-downloaded)
+  split: byclass           # emnist split: byclass, bymerge, balanced, letters, digits, mnist
+  val_fraction: 0.1
+  batch_size: 128
+  num_workers: 4
+  augment: true
+
+model:
+  name: cnn_classifier          # key into deeplearning.models registry
+  input_channels: 1             # EMNIST images are grayscale
+  num_classes: 62           # 47 for "balanced" split; adjust per split
+  dropout: 0.3
+
+train:
+  epochs: 15
+  lr: 0.001
+  weight_decay: 0.0001
+  optimizer: adam           # adam | sgd
+  scheduler: cosine         # none | step | cosine
+  early_stopping_patience: 5
+  seed: 42
+  device: auto              # auto | cpu | cuda | mps
+
+output:
+  root: outputs/            # all runs are written under here
+  save_every_epoch: false   # if true, checkpoint every epoch, not just best/last
