@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Mapping, Sequence
 
 import matplotlib.pyplot as plt
 import torch
@@ -20,10 +21,14 @@ def compute_classification_report(
     y_true: list[int],
     y_pred: list[int],
     output_path: str | Path | None = None,
+    class_names: Sequence[str] | None = None,
 ) -> dict:
     """Compute a sklearn classification report (precision/recall/F1 per class).
     Optionally writes it as JSON to `output_path`."""
-    report = classification_report(y_true, y_pred, output_dict=True, zero_division=0)
+    report_kwargs = {"output_dict": True, "zero_division": 0}
+    if class_names is not None:
+        report_kwargs.update(labels=list(range(len(class_names))), target_names=list(class_names))
+    report = classification_report(y_true, y_pred, **report_kwargs)
     if output_path is not None:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -40,7 +45,8 @@ def plot_confusion_matrix(
     normalize: bool = True,
 ) -> None:
     """Compute and save a confusion matrix heatmap as a PNG."""
-    cm = confusion_matrix(y_true, y_pred)
+    labels = list(range(len(class_names))) if class_names is not None else None
+    cm = confusion_matrix(y_true, y_pred, labels=labels)
     if normalize:
         cm = cm.astype("float") / cm.sum(axis=1, keepdims=True).clip(min=1)
 
@@ -62,4 +68,41 @@ def plot_confusion_matrix(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+
+
+def plot_training_history(
+    history: Mapping[str, Sequence[float]],
+    output_path: str | Path,
+) -> None:
+    """Plot train/validation loss and accuracy and save the figure."""
+    required = ("train_loss", "val_loss", "train_accuracy", "val_accuracy")
+    missing = [key for key in required if key not in history]
+    if missing:
+        raise KeyError(f"Training history is missing: {', '.join(missing)}")
+
+    epochs = history.get("epoch", range(1, len(history["train_loss"]) + 1))
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
+
+    axes[0].plot(epochs, history["train_loss"], label="Train")
+    axes[0].plot(epochs, history["val_loss"], label="Validation")
+    axes[0].set_title("Loss")
+    axes[0].set_xlabel("Epoch")
+    axes[0].set_ylabel("Cross-entropy")
+    axes[0].legend()
+    axes[0].grid(alpha=0.25)
+
+    axes[1].plot(epochs, history["train_accuracy"], label="Train")
+    axes[1].plot(epochs, history["val_accuracy"], label="Validation")
+    axes[1].set_title("Accuracy")
+    axes[1].set_xlabel("Epoch")
+    axes[1].set_ylabel("Accuracy")
+    axes[1].legend()
+    axes[1].grid(alpha=0.25)
+
+    fig.suptitle("Training history")
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)

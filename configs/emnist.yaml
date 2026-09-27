@@ -15,7 +15,7 @@ model:
   dropout: 0.3
 
 train:
-  epochs: 5
+  epochs: 2
   lr: 0.001
   weight_decay: 0.0001
   optimizer: adam           # adam | sgd

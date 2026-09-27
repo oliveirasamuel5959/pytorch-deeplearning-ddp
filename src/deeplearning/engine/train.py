@@ -8,12 +8,18 @@ import torch
 from torch.utils.data import DataLoader
 
 from deeplearning.config import TrainConfig
-from deeplearning.datasets.emnist import build_dataloaders
+from deeplearning.datasets.emnist import build_dataloaders, get_class_names
 from deeplearning.engine.evaluate import evaluate
 from deeplearning.engine.train_one_epoch import train_one_epoch
+from deeplearning.inference import Predictor
 from deeplearning.utils.checkpoint import find_best_checkpoint, remove_previous, save_checkpoint
 from deeplearning.utils.logger import MetricsLogger, get_logger
-from deeplearning.utils.metrics import compute_classification_report, plot_confusion_matrix
+from deeplearning.utils.metrics import (
+    compute_classification_report,
+    plot_confusion_matrix,
+    plot_training_history,
+)
+from deeplearning.utils.plots import plot_dataset_samples
 
 
 def _build_optimizer(model: torch.nn.Module, cfg: TrainConfig) -> torch.optim.Optimizer:
@@ -49,12 +55,25 @@ def run_training(
     (run_dir / "checkpoints").mkdir(parents=True, exist_ok=True)
     (run_dir / "metrics").mkdir(parents=True, exist_ok=True)
     (run_dir / "logs").mkdir(parents=True, exist_ok=True)
+    plots_dir = run_dir / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
 
     logger = get_logger("deeplearning.train", log_file=run_dir / "logs" / "train.log")
     metrics_logger = MetricsLogger(run_dir / "metrics" / "history.csv")
     
     logger.info(f"Building dataloaders for split '{cfg.data.split}' with batch_size={cfg.data.batch_size}...")
     train_loader, val_loader, test_loader = build_dataloaders(cfg.data)
+    class_names = class_names or get_class_names(test_loader.dataset)
+
+    sample_images, sample_labels = next(iter(test_loader))
+    plot_dataset_samples(
+        sample_images,
+        sample_labels,
+        class_names,
+        mean=(0.1751,),
+        std=(0.3332,),
+        output_path=plots_dir / "dataset_samples.png",
+    )
 
     model.to(device)
     optimizer = _build_optimizer(model, cfg)
@@ -63,12 +82,19 @@ def run_training(
 
     best_val_acc = 0.0
     epochs_without_improvement = 0
+    history: dict[str, list[float]] = {
+        "epoch": [],
+        "train_loss": [],
+        "train_accuracy": [],
+        "val_loss": [],
+        "val_accuracy": [],
+    }
 
     logger.info(f"Training run '{cfg.run_name}' on device={device} for {cfg.train.epochs} epochs")
 
     for epoch in range(1, cfg.train.epochs + 1):
         train_metrics = train_one_epoch(model, train_loader, optimizer, criterion, device, epoch)
-        val_metrics = evaluate(model, val_loader, criterion, device, desc=f"Epoch {epoch} [val]")
+        val_metrics = evaluate(model, val_loader, criterion, device, desc=f"Epoch {epoch} [validation]")
 
         if scheduler is not None:
             scheduler.step()
@@ -88,6 +114,11 @@ def run_training(
                 "lr": optimizer.param_groups[0]["lr"],
             }
         )
+        history["epoch"].append(float(epoch))
+        history["train_loss"].append(train_metrics["loss"])
+        history["train_accuracy"].append(train_metrics["accuracy"])
+        history["val_loss"].append(val_metrics["loss"])
+        history["val_accuracy"].append(val_metrics["accuracy"])
 
         if cfg.output.save_every_epoch:
             save_checkpoint(
@@ -115,6 +146,8 @@ def run_training(
             logger.info(f"Early stopping at epoch {epoch} (no improvement for {epochs_without_improvement} epochs)")
             break
 
+    plot_training_history(history, plots_dir / "training_history.png")
+
     logger.info("Training complete. Evaluating on test set with best checkpoint...")
     from deeplearning.utils.checkpoint import load_checkpoint
     
@@ -132,11 +165,23 @@ def run_training(
     compute_classification_report(
         test_metrics["y_true"], test_metrics["y_pred"],
         output_path=run_dir / "metrics" / "classification_report.json",
+        class_names=class_names,
     )
     plot_confusion_matrix(
         test_metrics["y_true"], test_metrics["y_pred"],
         output_path=run_dir / "metrics" / "confusion_matrix.png",
         class_names=class_names,
+    )
+
+    predictor = Predictor(
+        checkpoint_path=best_ckpt,
+        model_cfg=cfg.model,
+        device=str(device),
+        class_names=class_names,
+    )
+    predictor.predict_dataloader(
+        test_loader,
+        output_path=plots_dir / "test_predictions.png",
     )
 
     logger.info(f"Test accuracy: {test_metrics['accuracy']:.4f} | Test loss: {test_metrics['loss']:.4f}")

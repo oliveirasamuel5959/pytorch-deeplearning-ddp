@@ -8,7 +8,7 @@ Usage:
 from __future__ import annotations
 
 import torch
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Dataset, Subset, random_split
 from torchvision import datasets, transforms
 
 # Number of classes per official EMNIST split.
@@ -30,7 +30,24 @@ class _TransposeEMNIST:
 
 _FIX_ORIENTATION = _TransposeEMNIST()
 
-_MEAN, _STD = (0.1751,), (0.3332)  # approximate EMNIST-balanced statistics
+_MEAN, _STD = (0.1751,), (0.3332,)  # approximate EMNIST-balanced statistics
+
+
+def get_class_names(dataset: Dataset) -> list[str]:
+  """Return human-readable labels from a torchvision dataset or ``Subset``."""
+  while isinstance(dataset, Subset):
+    dataset = dataset.dataset
+
+  classes = getattr(dataset, "classes", None)
+  if classes is None:
+    raise AttributeError("The dataset does not expose a 'classes' attribute")
+  return [str(class_name) for class_name in classes]
+
+
+def get_emnist_class_names(root: str, split: str) -> list[str]:
+  """Load EMNIST metadata and return its class labels."""
+  dataset = datasets.EMNIST(root=root, split=split, train=False, download=True)
+  return get_class_names(dataset)
 
 def _build_transforms(augment: bool) -> tuple[transforms.Compose, transforms.Compose]:
   """Return (train_transform, eval_transform)."""
