@@ -12,17 +12,20 @@ import argparse
 import json
 import sys
 
+import torch
+
 from deeplearning.config import TrainConfig
 from deeplearning.datasets.emnist import build_dataloaders, EMNIST_NUM_CLASSES
 from deeplearning.engine.train import run_training
 from deeplearning.models.cnn_mlp import build_model
-from deeplearning.utils.device import resolve_device
+from deeplearning.utils.device import ddp_setup, resolve_device
 from deeplearning.utils.seed import set_seed
 from deeplearning.utils.logger import get_logger
 
 def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser(description="Train a CNN on EMNIST")
   parser.add_argument("--config", type=str, default="configs/default.yaml")
+  parser.add_argument("--train-mode", type=str, choices=["single", "ddp"], help="Training mode: single process or distributed (DDP)")
   parser.add_argument("--run-name", type=str, default=None)
   parser.add_argument("--epochs", type=int, default=None)
   parser.add_argument("--lr", type=float, default=None)
@@ -56,6 +59,10 @@ def main() -> None:
   device = resolve_device(cfg.train.device)
 
   model = build_model(cfg.model.input_channels, cfg.model.num_classes)
+  
+  if cfg.data.train_mode == "ddp":
+    world_size = torch.cuda.device_count() if device.type == "cuda" else 1
+    ddp_setup(rank=0, world_size=world_size)  # Initialize DDP process group even for single-process training
 
   summary = run_training(model, cfg, device)
 

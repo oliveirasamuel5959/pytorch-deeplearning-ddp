@@ -9,6 +9,7 @@ def save_checkpoint(
     path: str | Path,
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer | None = None,
+    train_mode: str = "full",
     epoch: int = 0,
     metrics: dict[str, Any] | None = None,
     extra: dict[str, Any] | None = None,
@@ -16,16 +17,32 @@ def save_checkpoint(
     """Save a full training checkpoint (model + optimizer + metadata)."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    
+    if train_mode == "ddp":
+        _ddp_save_checkpoint(path, model)
+        return
+    else:
+        payload = {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict() if optimizer is not None else None,
+            "metrics": metrics or {},
+        }
+        if extra:
+            payload.update(extra)
+        torch.save(payload, path)
+    
+def _ddp_save_checkpoint(
+    path: str | Path,
+    model: torch.nn.Module
+) -> None:
+    """Save a full training checkpoint (model + optimizer + metadata) for DDP training."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "epoch": epoch,
-        "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": optimizer.state_dict() if optimizer is not None else None,
-        "metrics": metrics or {},
+        "model_state_dict": model.module.state_dict(),
     }
-    if extra:
-        payload.update(extra)
     torch.save(payload, path)
-
 
 def load_checkpoint(
     path: str | Path,

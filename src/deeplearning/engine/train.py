@@ -84,7 +84,12 @@ def run_training(
         output_path=plots_dir / "dataset_samples.png",
     )
 
-    model.to(device)
+    if cfg.data.train_mode == "ddp":
+        model = model.to(device)
+        model = DDP(model, device_ids=[device.index] if device.type == "cuda" else None)
+    else:
+        model.to(device)
+        
     optimizer = _build_optimizer(model, cfg)
     scheduler = _build_scheduler(optimizer, cfg)
     criterion = torch.nn.CrossEntropyLoss()
@@ -129,27 +134,30 @@ def run_training(
         history["val_loss"].append(val_metrics["loss"])
         history["val_accuracy"].append(val_metrics["accuracy"])
 
-        if cfg.output.save_every_epoch:
+        # Save checkpoint for this epoch if requested
+        if device.index == 0 and cfg.output.save_every_epoch:
             save_checkpoint(
                 run_dir / "checkpoints" / f"{cfg.run_name}_epoch_{epoch:03d}_{val_metrics['accuracy']:.4f}.pt",
-                model, optimizer, epoch, val_metrics,
+                model, optimizer, cfg.data.train_mode, epoch, val_metrics,
             )
 
         is_best = val_metrics["accuracy"] > best_val_acc
-        if is_best:
+        
+        # Save best checkpoint if this is the best validation accuracy so far
+        if device.index == 0 and is_best:
             best_val_acc = val_metrics["accuracy"]
             epochs_without_improvement = 0
             
             remove_previous(run_dir / "checkpoints", "_best.pt")
             save_checkpoint(
                 run_dir / "checkpoints" / f"{cfg.run_name}_epoch_{epoch:03d}_valacc{val_metrics['accuracy']:.4f}_valloss{val_metrics['loss']:.4f}_best.pt", 
-                model, optimizer, epoch, val_metrics)
+                model, optimizer, cfg.data.train_mode, epoch, val_metrics)
             logger.info(f"[OK] New best val_acc={best_val_acc:.4f}, checkpoint saved")
         else:
             epochs_without_improvement += 1
 
-        remove_previous(run_dir / "checkpoints", "_last.pt")
-        save_checkpoint(run_dir / "checkpoints" / f"{cfg.run_name}_epoch_{epoch:03d}_valacc{val_metrics['accuracy']:.4f}_valloss{val_metrics['loss']:.4f}_last.pt", model, optimizer, epoch, val_metrics)
+        # remove_previous(run_dir / "checkpoints", "_last.pt")
+        # save_checkpoint(run_dir / "checkpoints" / f"{cfg.run_name}_epoch_{epoch:03d}_valacc{val_metrics['accuracy']:.4f}_valloss{val_metrics['loss']:.4f}_last.pt", model, optimizer, cfg.data.train_mode, epoch, val_metrics)
 
         if epochs_without_improvement >= cfg.train.early_stopping_patience:
             logger.info(f"Early stopping at epoch {epoch} (no improvement for {epochs_without_improvement} epochs)")

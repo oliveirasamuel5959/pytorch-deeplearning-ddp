@@ -8,7 +8,7 @@ Usage:
 from __future__ import annotations
 
 import torch
-from torch.utils.data import DataLoader, Dataset, Subset, random_split
+from torch.utils.data import DataLoader, Dataset, DistributedSampler, Subset, random_split
 from torchvision import datasets, transforms
 
 # Number of classes per official EMNIST split.
@@ -113,8 +113,15 @@ def build_dataloaders(data_cfg) -> tuple[DataLoader, DataLoader, DataLoader]:
       num_workers=data_cfg.num_workers,
       pin_memory=torch.cuda.is_available(),  # only pin when there's a GPU to benefit
     )
-    train_loader = DataLoader(train_set, shuffle=True, **loader_kwargs)
-    val_loader = DataLoader(val_set, shuffle=False, **loader_kwargs)
-    test_loader = DataLoader(test_set, shuffle=False, **loader_kwargs)
+    
+    train_loader = DataLoader(
+      train_set, 
+      shuffle=True if data_cfg.train_mode != "ddp" else False, 
+      sampler=DistributedSampler(train_set) if data_cfg.train_mode == "ddp" else None, 
+      **loader_kwargs
+    )
+    
+    val_loader = DataLoader(val_set, shuffle=False, sampler=DistributedSampler(val_set) if data_cfg.train_mode == "ddp" else None, **loader_kwargs)
+    test_loader = DataLoader(test_set, shuffle=False, sampler=DistributedSampler(test_set) if data_cfg.train_mode == "ddp" else None, **loader_kwargs)
 
     return train_loader, val_loader, test_loader

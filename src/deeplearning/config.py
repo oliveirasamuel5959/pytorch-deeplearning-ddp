@@ -11,6 +11,7 @@ import yaml
 
 @dataclass
 class DataConfig:
+  train_mode: str = "single"  # single | ddp
   root: str = "data/"
   split: str = "balanced"
   val_fraction: float = 0.1

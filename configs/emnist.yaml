@@ -1,6 +1,7 @@
 run_name: emnist_cnn
 
 data:
+  train_mode: ddp           # ddp | single
   root: data/               # where EMNIST raw/processed files live (auto-downloaded)
   split: byclass           # emnist split: byclass, bymerge, balanced, letters, digits, mnist
   val_fraction: 0.1
