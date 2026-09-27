@@ -8,7 +8,8 @@ Usage:
 from __future__ import annotations
 
 import torch
-from torch.utils.data import DataLoader, Dataset, DistributedSampler, Subset, random_split
+import torch.distributed as dist
+from torch.utils.data import DataLoader, Dataset, DistributedSampler, Sampler, Subset, random_split
 from torchvision import datasets, transforms
 
 # Number of classes per official EMNIST split.
@@ -49,6 +50,25 @@ def get_emnist_class_names(root: str, split: str) -> list[str]:
   dataset = datasets.EMNIST(root=root, split=split, train=False, download=True)
   return get_class_names(dataset)
 
+
+class DistributedEvalSampler(Sampler[int]):
+  """Shard evaluation data without padding or duplicating examples."""
+
+  def __init__(self, dataset: Dataset) -> None:
+    if not dist.is_available() or not dist.is_initialized():
+      raise RuntimeError("DistributedEvalSampler requires an initialized process group")
+    self.dataset_size = len(dataset)
+    self.rank = dist.get_rank()
+    self.world_size = dist.get_world_size()
+
+  def __iter__(self):
+    return iter(range(self.rank, self.dataset_size, self.world_size))
+
+  def __len__(self) -> int:
+    if self.rank >= self.dataset_size:
+      return 0
+    return (self.dataset_size - self.rank + self.world_size - 1) // self.world_size
+
 def _build_transforms(augment: bool) -> tuple[transforms.Compose, transforms.Compose]:
   """Return (train_transform, eval_transform)."""
   base = [
@@ -78,21 +98,29 @@ def build_dataloaders(data_cfg) -> tuple[DataLoader, DataLoader, DataLoader]:
     same attributes: root, split, val_fraction, batch_size, num_workers, augment).
     """
     train_tf, eval_tf = _build_transforms(data_cfg.augment)
+    distributed = data_cfg.train_mode == "ddp" and dist.is_available() and dist.is_initialized()
+    rank = dist.get_rank() if distributed else 0
+    if distributed and rank != 0:
+      # Rank zero downloads first; other ranks wait before opening the files.
+      dist.barrier()
+    download = not distributed or rank == 0
 
     full_train = datasets.EMNIST(
       root=data_cfg.root,
       split=data_cfg.split,
       train=True,
-      download=True,
+      download=download,
       transform=train_tf,
     )
     test_set = datasets.EMNIST(
       root=data_cfg.root,
       split=data_cfg.split,
       train=False,
-      download=True,
+      download=download,
       transform=eval_tf,
     )
+    if distributed and rank == 0:
+      dist.barrier()
 
     val_size = int(len(full_train) * data_cfg.val_fraction)
     train_size = len(full_train) - val_size
@@ -113,15 +141,21 @@ def build_dataloaders(data_cfg) -> tuple[DataLoader, DataLoader, DataLoader]:
       num_workers=data_cfg.num_workers,
       pin_memory=torch.cuda.is_available(),  # only pin when there's a GPU to benefit
     )
-    
+
+    if data_cfg.train_mode == "ddp":
+      train_sampler = DistributedSampler(train_set, shuffle=True)
+      val_sampler = DistributedEvalSampler(val_set)
+      test_sampler = DistributedEvalSampler(test_set)
+    else:
+      train_sampler = val_sampler = test_sampler = None
+
     train_loader = DataLoader(
-      train_set, 
-      shuffle=True if data_cfg.train_mode != "ddp" else False, 
-      sampler=DistributedSampler(train_set) if data_cfg.train_mode == "ddp" else None, 
-      **loader_kwargs
+      train_set,
+      shuffle=train_sampler is None,
+      sampler=train_sampler,
+      **loader_kwargs,
     )
-    
-    val_loader = DataLoader(val_set, shuffle=False, sampler=DistributedSampler(val_set) if data_cfg.train_mode == "ddp" else None, **loader_kwargs)
-    test_loader = DataLoader(test_set, shuffle=False, sampler=DistributedSampler(test_set) if data_cfg.train_mode == "ddp" else None, **loader_kwargs)
+    val_loader = DataLoader(val_set, shuffle=False, sampler=val_sampler, **loader_kwargs)
+    test_loader = DataLoader(test_set, shuffle=False, sampler=test_sampler, **loader_kwargs)
 
     return train_loader, val_loader, test_loader

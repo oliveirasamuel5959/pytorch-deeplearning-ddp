@@ -1,48 +1,39 @@
-"""Model checkpoint save/load utilities."""
+"""Portable model checkpoint utilities for single-process and DDP training."""
+
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Any
 
 import torch
+from torch.nn.parallel import DistributedDataParallel
+
+
+def _unwrap_model(model: torch.nn.Module) -> torch.nn.Module:
+    return model.module if isinstance(model, DistributedDataParallel) else model
 
 
 def save_checkpoint(
     path: str | Path,
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer | None = None,
-    train_mode: str = "full",
     epoch: int = 0,
     metrics: dict[str, Any] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> None:
-    """Save a full training checkpoint (model + optimizer + metadata)."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    
-    if train_mode == "ddp":
-        _ddp_save_checkpoint(path, model)
-        return
-    else:
-        payload = {
-            "epoch": epoch,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict() if optimizer is not None else None,
-            "metrics": metrics or {},
-        }
-        if extra:
-            payload.update(extra)
-        torch.save(payload, path)
-    
-def _ddp_save_checkpoint(
-    path: str | Path,
-    model: torch.nn.Module
-) -> None:
-    """Save a full training checkpoint (model + optimizer + metadata) for DDP training."""
+    """Save unwrapped model weights with optimizer state and metadata."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "model_state_dict": model.module.state_dict(),
+        "epoch": epoch,
+        "model_state_dict": _unwrap_model(model).state_dict(),
+        "optimizer_state_dict": optimizer.state_dict() if optimizer is not None else None,
+        "metrics": metrics or {},
     }
+    if extra:
+        payload.update(extra)
     torch.save(payload, path)
+
 
 def load_checkpoint(
     path: str | Path,
@@ -50,9 +41,11 @@ def load_checkpoint(
     optimizer: torch.optim.Optimizer | None = None,
     map_location: str | torch.device = "cpu",
 ) -> dict[str, Any]:
-    """Load a checkpoint into `model` (and `optimizer` if given). Returns the raw payload."""
+    """Load a portable checkpoint into either a plain or DDP-wrapped model."""
     payload = torch.load(path, map_location=map_location)
-    model.load_state_dict(payload["model_state_dict"])
+    state_dict = payload["model_state_dict"]
+    target = _unwrap_model(model)
+    target.load_state_dict(state_dict)
     if optimizer is not None and payload.get("optimizer_state_dict") is not None:
         optimizer.load_state_dict(payload["optimizer_state_dict"])
     return payload
@@ -64,12 +57,7 @@ def find_best_checkpoint(
     metric_key: str = "loss",
     mode: str = "min",
 ) -> Path:
-    """Scan checkpoint_dir for files matching `pattern`, read each checkpoint's
-    stored `metrics[metric_key]` payload, and return the path with the best value.
-
-    Reads metrics from inside each checkpoint (not the filename), so it's exact
-    and doesn't depend on your naming convention.
-    """
+    """Return the checkpoint with the best stored metric."""
     checkpoint_dir = Path(checkpoint_dir)
     candidates = list(checkpoint_dir.glob(pattern))
     if not candidates:
@@ -90,11 +78,10 @@ def find_best_checkpoint(
 
     if best_path is None:
         raise ValueError(f"No checkpoint in {checkpoint_dir} had metric '{metric_key}'")
-
     return best_path
 
+
 def remove_previous(checkpoint_dir: Path, suffix: str) -> None:
-    """Delete any existing checkpoint file ending in `suffix` (e.g. '_best.pt' or '_last.pt')
-    before a new one is saved, so only the single most recent one of that kind is kept."""
+    """Delete files ending in a checkpoint suffix."""
     for old_file in checkpoint_dir.glob(f"*{suffix}"):
         old_file.unlink()

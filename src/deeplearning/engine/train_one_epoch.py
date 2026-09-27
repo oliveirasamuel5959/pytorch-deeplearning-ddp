@@ -1,12 +1,11 @@
-"""Single training epoch."""
+"""Single training epoch with optional distributed metric reduction."""
 
 from __future__ import annotations
 
 import torch
+import torch.distributed as dist
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-
-from deeplearning.utils.metrics import accuracy
 
 
 def train_one_epoch(
@@ -16,15 +15,15 @@ def train_one_epoch(
     criterion: torch.nn.Module,
     device: torch.device,
     epoch: int,
+    show_progress: bool = True,
 ) -> dict[str, float]:
-    """Run one full pass over `loader`, updating `model` weights.
-
-    Returns a dict with mean 'loss' and 'accuracy' for the epoch.
-    """
+    """Run one full pass and return globally reduced loss and accuracy."""
     model.train()
-    running_loss, running_acc, n_batches = 0.0, 0.0, 0
+    loss_sum = 0.0
+    correct = 0
+    sample_count = 0
 
-    progress = tqdm(loader, desc=f"Epoch {epoch} [train]", leave=False)
+    progress = tqdm(loader, desc=f"Epoch {epoch} [train]", leave=False, disable=not show_progress)
     for images, targets in progress:
         images, targets = images.to(device), targets.to(device)
 
@@ -34,13 +33,23 @@ def train_one_epoch(
         loss.backward()
         optimizer.step()
 
-        batch_acc = accuracy(logits.detach(), targets)
-        running_loss += loss.item()
-        running_acc += batch_acc
-        n_batches += 1
-        progress.set_postfix(loss=loss.item(), acc=batch_acc)
+        batch_size = targets.numel()
+        loss_sum += loss.item() * batch_size
+        correct += int((logits.detach().argmax(dim=1) == targets).sum().item())
+        sample_count += batch_size
+        if show_progress:
+            progress.set_postfix(loss=loss.item())
 
+    stats = torch.tensor(
+        [loss_sum, float(correct), float(sample_count)],
+        dtype=torch.float64,
+        device=device,
+    )
+    if dist.is_available() and dist.is_initialized():
+        dist.all_reduce(stats, op=dist.ReduceOp.SUM)
+
+    total_samples = max(stats[2].item(), 1.0)
     return {
-        "loss": running_loss / max(n_batches, 1),
-        "accuracy": running_acc / max(n_batches, 1),
+        "loss": stats[0].item() / total_samples,
+        "accuracy": stats[1].item() / total_samples,
     }
