@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
+
+# Deep learning imports
+import torch
+import torch.multiprocessing as mp
+from torch.utils.data.distributed import DistributedSampler
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.distributed import init_process_group, destroy_process_group
+
+# Standard library imports
+import os
 from pathlib import Path
 
-import torch
-from torch.utils.data import DataLoader
-
+# Local imports
 from deeplearning.config import TrainConfig
 from deeplearning.datasets.emnist import build_dataloaders, get_class_names
 from deeplearning.engine.evaluate import evaluate
 from deeplearning.engine.train_one_epoch import train_one_epoch
 from deeplearning.inference import Predictor
 from deeplearning.utils.checkpoint import find_best_checkpoint, remove_previous, save_checkpoint
+from deeplearning.utils.checkpoint import load_checkpoint
 from deeplearning.utils.logger import MetricsLogger, get_logger
 from deeplearning.utils.metrics import (
     compute_classification_report,
@@ -148,8 +157,6 @@ def run_training(
 
     plot_training_history(history, plots_dir / "training_history.png")
 
-    logger.info("Training complete. Evaluating on test set with best checkpoint...")
-    from deeplearning.utils.checkpoint import load_checkpoint
     
     best_ckpt = find_best_checkpoint(
         run_dir / "checkpoints",
@@ -158,6 +165,7 @@ def run_training(
         mode="min",
     )
 
+    logger.info(f"Training complete. Evaluating on test set with best checkpoint {best_ckpt}...")
     # load_checkpoint(run_dir / "checkpoints" / f"{cfg.run_name}_epoch_{epoch:03d}_valacc{val_metrics['accuracy']:.4f}_valloss{val_metrics['loss']:.4f}_best.pt", model, map_location=device)
     load_checkpoint(best_ckpt, model, map_location=device)
     test_metrics = evaluate(model, test_loader, criterion, device, collect_predictions=True, desc="test")
