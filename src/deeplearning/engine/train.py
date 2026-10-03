@@ -148,6 +148,7 @@ def run_training(
             show_progress=True,
             rank=context.rank,
             local_rank=context.local_rank,
+            distributed=ddp_enabled,
         )
         
         val_metrics = evaluate(
@@ -159,6 +160,7 @@ def run_training(
             show_progress=True,
             rank=context.rank,
             local_rank=context.local_rank,
+            distributed=ddp_enabled,
         )
 
         if scheduler is not None:
