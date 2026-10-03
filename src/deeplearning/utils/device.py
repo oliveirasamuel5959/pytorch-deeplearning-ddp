@@ -79,7 +79,12 @@ def ddp_setup(
     # torchrun supplies these values. Direct spawning supplies them in the parent.
     os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
     os.environ.setdefault("MASTER_PORT", "29500")
-    dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
+    dist.init_process_group(
+        backend=backend,
+        rank=rank,
+        world_size=world_size,
+        device_id=torch.device(f"cuda:{local_rank}"),
+    )
     return DistributedContext(rank, local_rank, world_size, enabled=True)
 
 
