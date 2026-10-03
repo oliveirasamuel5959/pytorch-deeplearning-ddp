@@ -256,9 +256,11 @@ def run_training(
         
         logger.info(
             f"Training completed | "
-            f"total_time={training_time.total_seconds:.2f}s "
-            f"({training_time.total_minutes:.2f} min) | "
-            f"average_epoch={training_time.average_epoch_seconds:.2f}s"
+            f"total_time={training_time.total_seconds:.4f}s "
+            f"({training_time.total_minutes:.4f} min) | "
+            f"total_hours={training_time.total_hours:.4f}h | "
+            f"average_epoch={training_time.average_epoch_seconds:.4f}s"
+            
         )
         
         train_samples = len(train_loader)
