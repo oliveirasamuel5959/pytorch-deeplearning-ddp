@@ -1,4 +1,3 @@
-```python
 """Training time monitoring utilities."""
 
 from __future__ import annotations
