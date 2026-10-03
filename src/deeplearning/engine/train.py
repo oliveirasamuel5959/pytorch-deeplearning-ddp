@@ -15,7 +15,7 @@ from deeplearning.datasets.emnist import build_dataloaders, get_class_names
 from deeplearning.engine.evaluate import evaluate
 from deeplearning.engine.train_one_epoch import train_one_epoch
 from deeplearning.utils.checkpoint import find_best_checkpoint, load_checkpoint, remove_previous, save_checkpoint
-from deeplearning.utils.device import get_distributed_context
+from deeplearning.utils.device import get_distributed_context, verify_gpu_assign
 from deeplearning.utils.logger import MetricsLogger, get_logger
 from deeplearning.utils.metrics import compute_classification_report, plot_confusion_matrix, plot_training_history
 from deeplearning.utils.plots import plot_dataset_samples, plot_predictions_grid
@@ -115,6 +115,8 @@ def run_training(
         )
 
     model.to(device)
+    verify_gpu_assign(device, logger, context.rank, context.local_rank)
+    
     if ddp_enabled:
         model = DDP(model, device_ids=[device.index], output_device=device.index)
 
@@ -135,11 +137,12 @@ def run_training(
     for epoch in range(1, cfg.train.epochs + 1):
         if isinstance(train_loader.sampler, DistributedSampler):
             train_loader.sampler.set_epoch(epoch)
-
+        
         train_metrics = train_one_epoch(
             model, train_loader, optimizer, criterion, device, epoch,
             show_progress=context.is_main_process,
         )
+        
         val_metrics = evaluate(
             model, val_loader, criterion, device,
             desc=f"Epoch {epoch} [validation]",

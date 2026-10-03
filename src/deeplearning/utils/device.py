@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 
 import torch
 import torch.distributed as dist
+
+from deeplearning.utils.logger import get_logger
+
+
+
+
 
 
 @dataclass(frozen=True)
@@ -87,6 +94,20 @@ def ddp_setup(
     )
     return DistributedContext(rank, local_rank, world_size, enabled=True)
 
+
+def verify_gpu_assign(device: torch.device, logger: logging.Logger, rank: int = 0, local_rank: int = 0) -> None:
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated(device) / 1024**3
+        reserved = torch.cuda.memory_reserved(device) / 1024**3
+
+        logger.info(
+            f"rank={rank} | "
+            f"local_rank={local_rank} | "
+            f"device={device} | "
+            f"GPU={torch.cuda.get_device_name(device)} | "
+            f"memory_allocated={allocated:.2f} GB | "
+            f"memory_reserved={reserved:.2f} GB"
+        )
 
 def ddp_cleanup() -> None:
     """Destroy the process group if this process initialized one."""
