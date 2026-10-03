@@ -115,7 +115,7 @@ def run_training(
         )
 
     model.to(device)
-    verify_gpu_assign(device, logger, context.rank, context.local_rank)
+    # verify_gpu_assign(device, logger, context.rank, context.local_rank)
     
     if ddp_enabled:
         model = DDP(model, device_ids=[device.index], output_device=device.index)
@@ -139,14 +139,26 @@ def run_training(
             train_loader.sampler.set_epoch(epoch)
         
         train_metrics = train_one_epoch(
-            model, train_loader, optimizer, criterion, device, epoch,
-            show_progress=context.is_main_process,
+            model, 
+            train_loader, 
+            optimizer, 
+            criterion, 
+            device, 
+            epoch,
+            show_progress=True,
+            rank=context.rank,
+            local_rank=context.local_rank,
         )
         
         val_metrics = evaluate(
-            model, val_loader, criterion, device,
+            model, 
+            val_loader, 
+            criterion, 
+            device,
             desc=f"Epoch {epoch} [validation]",
-            show_progress=context.is_main_process,
+            show_progress=True,
+            rank=context.rank,
+            local_rank=context.local_rank,
         )
 
         if scheduler is not None:

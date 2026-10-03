@@ -16,6 +16,9 @@ def train_one_epoch(
     device: torch.device,
     epoch: int,
     show_progress: bool = True,
+    rank=0,
+    local_rank=0,
+    distributed: bool = False,
 ) -> dict[str, float]:
     """Run one full pass and return globally reduced loss and accuracy."""
     model.train()
@@ -23,7 +26,22 @@ def train_one_epoch(
     correct = 0
     sample_count = 0
 
-    progress = tqdm(loader, desc=f"Epoch {epoch} [train]", leave=False, disable=not show_progress)
+    if distributed:
+        progress = tqdm(
+            loader,
+            desc=f"Rank {rank} / GPU {local_rank}: Epoch {epoch} [train]",
+            position=rank,
+            leave=True,
+            disable=not show_progress,
+        )
+    else:
+        progress = tqdm(
+            loader,
+            desc=f"Epoch {epoch} [train]",
+            leave=False,
+            disable=not show_progress,
+        )
+        
     for images, targets in progress:
         images, targets = images.to(device), targets.to(device)
 

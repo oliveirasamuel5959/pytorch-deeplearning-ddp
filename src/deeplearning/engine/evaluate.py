@@ -17,6 +17,9 @@ def evaluate(
     collect_predictions: bool = False,
     desc: str = "eval",
     show_progress: bool = True,
+    rank: int = 0,
+    local_rank: int = 0,
+    distributed: bool = False,
 ) -> dict:
     """Evaluate a loader and reduce metrics across all active DDP ranks."""
     model.eval()
@@ -26,7 +29,17 @@ def evaluate(
     y_true: list[int] = []
     y_pred: list[int] = []
 
-    progress = tqdm(loader, desc=desc, leave=False, disable=not show_progress)
+    if distributed:
+        progress = tqdm(
+            loader,
+            desc=f"Rank {rank} / GPU {local_rank}: {desc}",
+            position=rank,
+            leave=True,
+            disable=not show_progress,
+        )
+    else:
+        progress = tqdm(loader, desc=desc, disable=not show_progress)
+        
     for images, targets in progress:
         images, targets = images.to(device), targets.to(device)
         logits = model(images)
@@ -46,8 +59,7 @@ def evaluate(
         dtype=torch.float64,
         device=device,
     )
-    distributed = dist.is_available() and dist.is_initialized()
-    if distributed:
+    if distributed and dist.is_available() and dist.is_initialized():
         dist.all_reduce(stats, op=dist.ReduceOp.SUM)
 
     if collect_predictions and distributed:
