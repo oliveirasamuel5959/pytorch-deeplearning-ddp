@@ -17,8 +17,9 @@ from deeplearning.engine.train_one_epoch import train_one_epoch
 from deeplearning.utils.checkpoint import find_best_checkpoint, load_checkpoint, remove_previous, save_checkpoint
 from deeplearning.utils.device import get_distributed_context, verify_gpu_assign
 from deeplearning.utils.logger import MetricsLogger, get_logger
-from deeplearning.utils.metrics import compute_classification_report, plot_confusion_matrix, plot_training_history
+from deeplearning.utils.metrics import compute_classification_report, plot_confusion_matrix, plot_training_history, save_performance_metrics
 from deeplearning.utils.plots import plot_dataset_samples, plot_predictions_grid
+from deeplearning.utils.training_timer import TrainingTimer
 
 
 def _build_optimizer(model: torch.nn.Module, cfg: TrainConfig) -> torch.optim.Optimizer:
@@ -60,6 +61,10 @@ def run_training(
     device: torch.device,
     class_names: list[str] | None = None,
 ) -> dict:
+    
+    timer = TrainingTimer(device=device)
+    timer.start()
+    
     """Train a model and write rank-zero artifacts under ``cfg.run_dir()``."""
     context = get_distributed_context()
     ddp_enabled = cfg.data.train_mode == "ddp"
@@ -135,6 +140,8 @@ def run_training(
     }
 
     for epoch in range(1, cfg.train.epochs + 1):
+        timer.start_epoch()
+        
         if isinstance(train_loader.sampler, DistributedSampler):
             train_loader.sampler.set_epoch(epoch)
         
@@ -240,9 +247,29 @@ def run_training(
             if context.is_main_process:
                 logger.info("Early stopping at epoch %d", epoch)
             break
-
+    
+    
+    training_time = timer.stop()
+    
     if context.is_main_process:
         plot_training_history(history, plots_dir / "training_history.png")
+        
+        logger.info(
+            f"Training completed | "
+            f"total_time={training_time.total_seconds:.2f}s "
+            f"({training_time.total_minutes:.2f} min) | "
+            f"average_epoch={training_time.average_epoch_seconds:.2f}s"
+        )
+        
+        train_samples = len(train_loader)
+        
+        save_performance_metrics(
+            training_time=training_time,
+            train_samples=train_samples,
+            cfg=cfg,
+            output_path=run_dir / "metrics" / "performance_metrics.json",
+        )
+        
     _barrier(context.enabled)
 
     best_checkpoint = find_best_checkpoint(

@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import torch
 from sklearn.metrics import classification_report, confusion_matrix
 
+from deeplearning.utils.training_timer import TrainingTime
+
 
 def accuracy(logits: torch.Tensor, targets: torch.Tensor) -> float:
     """Top-1 accuracy for a batch of logits vs. integer targets."""
@@ -106,3 +108,28 @@ def plot_training_history(
     fig.tight_layout()
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
+
+def save_performance_metrics(
+    training_time: TrainingTime,
+    train_samples: int,
+    cfg,
+    output_path: str | Path,
+) -> None:
+    """Save performance metrics as a JSON file."""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    performance_metrics = {
+        "total_training_seconds": training_time.total_seconds,
+        "total_training_minutes": training_time.total_minutes,
+        "total_training_hours": training_time.total_hours,
+        "average_epoch_seconds": training_time.average_epoch_seconds,
+        "epoch_seconds": training_time.epoch_seconds,
+        "training_samples": train_samples,
+        "throughput_samples_per_second": training_time.throughput(
+            train_samples * cfg.train.epochs
+        ),
+    }
+    
+    with open(output_path, "w") as f:
+        json.dump(performance_metrics, f, indent=4)
